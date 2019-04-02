@@ -1,6 +1,12 @@
 
 # Contribute to the documentation
 
+## Correcting minor issues in documents
+
+If your correcting a minor issue in a document like a typo or otherwise please ensure:
+- That you fork from `dev` not master and submit the pull request against dev.
+- that you make the change to the markdown under the `*/templates/*` folder and *not* under the `*/generated/*` folder.
+
 ## Prerequisite
 
 1. Verify that npm version is 3.10.6 or greater:
@@ -16,9 +22,9 @@
     $>npm install gulp -g
     ```
 1. To generate documents for Github:
-    - For AzureUx-PortalFx / framework repo, execute following command from docs directory:
+    - For AzureUx-PortalFx / framework repo, execute following command from doc directory:
         ```ts
-        $>cd AzureUx-PortalFx\docs
+        $>cd AzureUx-PortalFx\doc
         $>npm install --no-optional
         ```
     - For github repo,  execute following command from root directory
@@ -94,6 +100,9 @@ To verify all links work use
 ```
 $>npm run docs -- --verify
 ```
+
+If you have added new links that internal or authenticated or dummy then you can exclude checks for them by including them in  urlsToSkip array on line 250 of gulpcommon.js.
+
 
 Preview the generated markdown in both \*-index.md and \articles\*.md using a tool like [Visual Studio Code](https://code.visualstudio.com/) and its [Markdown preview](https://code.visualstudio.com/Docs/languages/markdown#_markdown-preview)
 

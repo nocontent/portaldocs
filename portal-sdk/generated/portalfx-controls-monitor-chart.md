@@ -1,11 +1,10 @@
 <a name="monitor-chart"></a>
 ## Monitor Chart
-> **Important:** The Monitor Chart control is currently in preview and is under active development. Unless your Extension's scenario has already been discussed with the Portal team, this control should only be used for prototyping.
-
 The Monitor Chart control allows you to plot the metrics for your resource in Azure. It is part of the Ibiza framework, and it inherently knows how to fetch data for your resource.
 
-The Monitor Chart control is available in SDK version **5.0.302.718** and above.
+The Monitor Chart control is available in SDK version **5.0.302.731** and above.
 
+Look here for a new version of this control -[MonitorChartV2 Control](portalfx-controls-monitor-chart-v2.md)
 <a name="monitor-chart-benefits"></a>
 ### Benefits
 - **Performance** - The charts are built to render quickly and make efficient network calls for data
@@ -14,15 +13,17 @@ The Monitor Chart control is available in SDK version **5.0.302.718** and above.
 
 <a name="monitor-chart-pre-requisites-onboard-to-monitor-config"></a>
 ### Pre-requisites: Onboard to Monitor config
-If you are onboarding to Azure Monitor for the first time, please reach out to the [Monitoring team](mailto:ibizamon@microsoft.com). 
+If you are onboarding to Azure Monitor for the first time, please reach out to the [Monitoring team](mailto:monitoringcontrib@microsoft.com).
 
 The Monitoring team will add your resource type to a config which allows the Monitor Control to know how to fetch metrics for your resources.
 
+
 <a name="controlUsage"></a>
+
 <a name="monitor-chart-using-the-control"></a>
 ### Using the control
 ```typescript
-import * as MonitorChart from "Fx/Internal/Controls/MonitorChart";
+import * as MonitorChart from "Fx/Controls/MonitorChart";
 
 ...
 
@@ -51,77 +52,106 @@ const monitorChartViewModel = MonitorChart.create(bladeOrPartContainer, moni
 
 > You can plot more than one chart while referencing the control. Also, you can plot multiple metrics for each chart.
 
-> To see a complete list of the options you can pass to the control, look at the `Fx/Internal/Controls/MonitorChart` module in Fx.d.ts, or you can [view the interfaces directly in the PortalFx repo][6].
+> To see a complete list of the options you can pass to the control, look at the `Fx/Controls/MonitorChart` module in Fx.d.ts, or you can [view the interfaces directly in the PortalFx repo][6].
 
-<a name="legacyBladeUsage"></a>
-<a name="monitor-chart-legacy-blades-using-the-control-on-a-locked-unlocked-blade"></a>
-### [ LEGACY BLADES ] Using the control on a locked/unlocked blade
+<a name="monitor-chart-legacy-blade-usage"></a>
+### Legacy blade usage
+<a name="monitor-chart-using-the-control-on-a-locked-unlocked-blade"></a>
+### Using the control on a locked/unlocked blade
 If you are not using a template blade, you can reference the `MonitorChartPart` from the `HubsExtension` in your blade's pdl.
 
-> Ensure that you have the HubsExtension.pde added to your extension
+> Ensure that you have the HubsExtension.pde added to your extension. You can get the HubsExtension.pde and the HubsExtension.d.ts file from Microsoft.Portal.Extensions.Hubs.<<Build#>>.nupkg
 
 **Example Blade PDL:**
 ```xml
-<?xml version="1.0" encoding="utf-8" ?>
 <Definition xmlns="http://schemas.microsoft.com/aux/2013/pdl"
             xmlns:azurefx="http://schemas.microsoft.com/aux/2013/pdl/azurefx"
-            Area="ExampleArea">
- 
-  <Blade Name="ExampleBlade"
-         ViewModel="{ViewModel Name=ExampleViewModel}"
-         Width="Large"
-         Locked="True">
-    <Lens Name="MonitorChartLens">
+            Area="MyArea">
 
-      <!-- MonitorChartPart reference: -->
-      <PartReference Name="MonitorChart" Extension="HubsExtension" PartType="MonitorChartPart" InitialSize="HeroWide">
+  <AdaptedPart Name="MyMonitorChartPartAdapter"
+    AdapterViewModel="{ViewModel Name=MonitorChartPartAdapter, Module=./MonitorChartPartAdapter}">
+
+    <AdaptedPart.InputDefinitions>
+      <InputDefinition Name="id" Type="MsPortalFx.ViewModels.ResourceId" />
+    </AdaptedPart.InputDefinitions>
+
+    <PartReference Name="MyMonitorChartPart" Extension="HubsExtension" PartType="MonitorChartPart">
+      <PartReference.PropertyBindings>
+        <Binding Property="options" Source="{Adapter options}" />
+      </PartReference.PropertyBindings>
+    </PartReference>
+
+  </AdaptedPart>
+
+  <Blade Name="MyBlade"
+         ViewModel="{ViewModel Name=MyBladeViewModel, Module=./MyBlade}">
+    <Lens Name="MonitoringLens">
+
+      <PartReference Name="MyPart" PartType="MyMonitorChartPartAdapter" InitialSize="HeroWide">
         <PartReference.PropertyBindings>
-          <Binding Property="options">
-            <BladeProperty Property="partParameters.options" />
-          </Binding>
-          <Binding Property="disableEdit">
-            <BladeProperty Property="partParameters.disableEdit" />
-          </Binding>
+            <Binding Property="id">
+                <BladeParameter Property="id"/>
+            </Binding>
         </PartReference.PropertyBindings>
       </PartReference>
 
     </Lens>
   </Blade>
+
 </Definition>
 ```
+
 **Example Blade view model:**
 ```typescript
-export class MonitorChartBladeViewModel extends FxViewModels.Blade {
-    public partParameters = ko.observable<MonitorChartPartParameters>();
+import * as Blade from "Fx/Composition/Pdl/Blade";
 
-    constructor(container: FxViewModels.ContainerContract) {
-        super();
-       
-        this.partParameters({
-            options: {
-                charts: [{
-                    metrics: [{
-                        name: "ActionLatency",
-                        resourceMetadata: {
-                            resourceId: "/subscriptions/0531c8c8-df32-4254-a717-b6e983273e5f/resourceGroups/ibizafeedback/providers/Microsoft.Logic/workflows/Ibiza-CleanUnusedTags"
-                        },
-                        aggregationType: 1
-                    }]
-                }],
-                timespan: {
-                    relative: {
-                        durationMs: 1000000000
-                    }
-                }
-            },
-            disableEdit: false
-        });
+export class MonitorChartTestBladeViewModel {
+    constructor(container: Blade.Container, initialState: any, dataContext: any) {
+    }
 
+    public onInputsSet(inputs: any): Q.Promise<void> {
+        return null;
     }
 }
 ```
 
-> To see a complete list of the options you can pass to the MonitorChartPart, look at the `MonitorChartPartExportedTypes.d.ts` file either in the Hubs Nuget package, or [directly in the Hubs repo][7].
+**Example Adapted part view model:**
+```typescript
+/// <reference path="../../_extensions/Hubs/HubsExtension.d.ts />
+import AggregationType = HubsExtension.MonitorChartPart.AggregationType;
+import MonitorChartPartOptions = HubsExtension.MonitorChartPart.Options;
+
+export class MonitorChartPartAdapter {
+    public options: KnockoutObservable<MonitorChartPartOptions>;
+
+    constructor(container: any, initialState: any, dataContext: any) {
+        this.options = ko.observable({
+            charts: [
+                {
+                    title: "My chart title",
+                    metrics: [
+                        {
+                            name: "ActionLatency",
+                            resourceMetadata: {
+                                resourceId: "/subscriptions/1f3fa6d2-851c-4a91-9087-1a050f3a9c38/resourceGroups/Monitor-Test/providers/Microsoft.Logic/workflows/MonitorTestLogicApp"
+                            },
+                            // For best performance, be sure to include the default aggregation type with each metric:
+                            aggregationType: AggregationType.Average
+                        }
+                    ],
+                    timespan: {
+                        relative: {
+                            durationsMs: 1 * 24 * 60 * 60 * 1000 // 1 day in milliseconds
+                        }
+                    }
+                }
+            ]
+        });
+    }
+}
+```
+
+> To see a complete list of the options you can pass to the MonitorChartPart, look at the `HubsExtension.d.ts` file either in the Hubs Nuget package, or [directly in the Hubs repo][7].
 
 <a name="monitor-chart-try-it-out-in-samples-extension"></a>
 ### Try it out in samples extension
@@ -244,16 +274,16 @@ From here, users can explore other metrics, pin charts to dashboard, create an a
 
 - ***My extension is still using legacy blades (locked or unlocked). Is this still applicable to me? If yes, do I get the benefits mentioned above?***
 
-    Yes, even if you are not using template blades you can [reference the MonitorChartPart](#legacyBladeUsage) from the Hubs extension. 
-    
-    If you already have an Insights/Monitoring Metrics part on your blade, instead of referencing the metrics part from Insights/Monitoring extension, you can reference the part from Hubs extension. Since the Hubs extension is always loaded when you load the portal, it will already be loaded by the time user loads your extension blade. Hence, you will not load an additional extension and get significant perf benefits. 
-    
+    Yes, even if you are not using template blades you can [reference the MonitorChartPart](#legacy-blade-usage) from the Hubs extension.
+
+    If you already have an Insights/Monitoring Metrics part on your blade, instead of referencing the metrics part from Insights/Monitoring extension, you can reference the part from Hubs extension. Since the Hubs extension is always loaded when you load the portal, it will already be loaded by the time user loads your extension blade. Hence, you will not load an additional extension and get significant perf benefits.
+
     However, for the best performance, we strongly recommend that you move towards template blades and [consume the MonitorChart control](#controlUsage) directly.
 
 - ***Can the users change the metrics/time range/chart type of the charts shown in the overview blade?***
 
-    No, users cannot customize what is shown in the overview blade. For any customizations, users can click on the chart, go to Azure Monitor, tweak the chart if needed and then pin to the dashboard. The dashboard will contain all the charts that users want to customize and view. 
-    
+    No, users cannot customize what is shown in the overview blade. For any customizations, users can click on the chart, go to Azure Monitor, tweak the chart if needed and then pin to the dashboard. The dashboard will contain all the charts that users want to customize and view.
+
     This keeps our story consistent: view the metrics in overview blade, explore them in Azure Monitor and track/monitor them in Azure Dashboard. Removing customizations from blades also provides more reliable blade performance.
 
 <!-- References -->
@@ -262,5 +292,5 @@ From here, users can explore other metrics, pin charts to dashboard, create an a
 [3]: ../media/portalfx-controls-monitor-chart/monitor-chart-control-multiple-inputs.png
 [4]: ../media/portalfx-controls-monitor-chart/monitor-chart-control-overview-blade.png
 [5]: ../media/portalfx-controls-monitor-chart/monitor-chart-control-azure-monitor.png
-[6]: https://msazure.visualstudio.com/DefaultCollection/One/_git/AzureUX-PortalFX?path=%2Fsrc%2FSDK%2FFramework.Client%2FTypeScript%2FFx%2FInternal%2FControls%2FMonitorChart.ts&version=GBproduction&_a=contents
-[7]: https://msazure.visualstudio.com/DefaultCollection/One/_git/AzureUX-PortalFX?path=%2Fsrc%2FSDK%2FExtensions%2FHubsExtension%2FTypeScript%2FHubsExtension%2FForExport%2FMonitorChartPartExportedTypes.d.ts&version=GBproduction&_a=contents
+[6]: https://msazure.visualstudio.com/DefaultCollection/One/_git/AzureUX-PortalFX?path=%2Fsrc%2FSDK%2FFramework.Client%2FTypeScript%2FFx%2FControls%2FMonitorChart.ts&version=GBproduction&_a=contents
+[7]: https://msazure.visualstudio.com/DefaultCollection/One/_git/AzureUX-PortalFX?path=%2Fsrc%2FSDK%2FExtensions%2FHubsExtension%2FTypeScript%2FHubsExtension%2FForExport%2FMonitorChartPart.d.ts&_a=contents

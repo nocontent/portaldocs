@@ -51,7 +51,7 @@ module Main {
     htmlTemplate: "" +
         "<div class='msportalfx-padding'>" +
         "  <div>This is a Template Blade.</div>" +
-        "</div>"
+        "</div>",
 })
 //docs#DecoratorReference
 export class SimpleTemplateBlade {
@@ -78,7 +78,7 @@ This is the decorator code.  There are several options that can be specified as 
     htmlTemplate: "" +
         "<div class='msportalfx-padding'>" +
         "  <div>This is a Template Blade.</div>" +
-        "</div>"
+        "</div>",
 })
 
 ```

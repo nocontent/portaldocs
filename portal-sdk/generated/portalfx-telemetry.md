@@ -15,12 +15,12 @@
 
 Ibiza portal tracks several pieces of information as users navigate through the portal. Extensions do not need to consume any APIs to have this information collected.
 
-> **Note**: Currently, telemetry is made available to partners through Kusto. In order to access the Portal logs you must get 
-access to [Azure Portal Data](http://idwebelements/GroupManagement.aspx?Group=auxdatapartners&Operation=join) group.
+> **Note**: Currently, telemetry is made available to partners through Kusto. All Azure employees should have access, if you don't have access ensure you have joined your team's standard access group and it's listed here [http://aka.ms/standardaccess](http://aka.ms/standardaccess). If it is not listed then please reach out to [Ibiza Telemetry](mailto:ibiza-telemetry@microsoft.com).
 
 You can access our Kusto cluster using <a href="https://azportal.kusto.windows.net/AzurePortal" target="_blank" title="Kusto">Kusto Explorer</a> or 
-<a href="https://azportal.kusto.windows.net/AzurePortal?web=1" target="_blank" title="KustoWeb">Kusto Web Explorer</a>. 
-Our Kusto cluster contains two databases: 
+<a href="https://azportal.kusto.windows.net/AzurePortal?web=1" target="_blank" title="KustoWeb">Kusto Web Explorer</a>.
+
+Our Kusto cluster contains two databases:
 
 * AzurePortal - which contains the raw data
 * AzPtlCosmos - which is our main telemetry database used in all the official dashboards and reports. Data from this database is deduped, geo-coded, expanded and has test traffic filtered out.
@@ -92,18 +92,12 @@ The following actions are logged to ClientTelemetry table:
 
 * Extension events
 
-    * **LoadExtensions**
-        * Measures the time it takes Shell to create the extension's IFrame until Shell receives the extension's manifest.
-        * "actionModifier" = start is triggered when an extension starts loading
-        * "actionModifier" = cancel is triggered when an extension fails loading
-        * "actionModifier" = complete is triggered when an extension finishes loading
-    * **InitializeExtensions**
-        * Measures the time since Shell receives the extension manifest until Shell receives an RPC response stating that the extension's state is Initialized.
-        * "actionModifier" = start is triggered when an extension starts being initialized
-        * "actionModifier" = cancel is triggered when an extension's initialization fails
-        * "actionModifier" = complete is triggered when an extension's initialization finishes
+    * **ExtensionLoad**
+        * Measures the total time it takes to load an extension breaking down all the steps in the data object
+        * "actionModifier" = cancel is triggered when an extension's load fails
+        * "actionModifier" = complete is triggered when an extension's load finishes
 
-    "name" column provides the name of the extension which is being loaded/initialized.
+    "name" column provides the name of the extension which is being loaded.
 
 * Create events
 
@@ -157,7 +151,7 @@ You can use the Portal telemetry APIs to log telemetry. However, before you do s
 
 ```ts
   // Initialize the telemetry functionality and make it available for use.
-  MsPortalFx.Base.Diagnostics.Telemetry.initialize("ExtensionName", false /* traceBrowserInformation */ );
+  MsPortalFx.Base.Diagnostics.Telemetry.initialize("ExtensionName");
 ```
 
 > Note that you don't need to trace browser information to your particular extension as this data is collected globally. However, if you would like the browser information in your own telemetry store set traceBrowserInformation to true.
@@ -202,13 +196,12 @@ We have built [Extension Errors Dashboard](portalfx-telemetry-extension-errors.m
 <a name="portal-telemetry-overview-available-power-bi-dashboards"></a>
 ## Available Power BI Dashboards
 
-Following are some of the dashboards that we support. If you do not have access to any of these please request the right permissions in [Getting Started](onenote:#Getting%20Started&section-id={B333CBFA-BF45-47DC-816B-37B2F3CFD7E8}&page-id={F1EE506C-5158-49DB-AD06-1027E2BC3EAD}&end&base-path=https://microsoft.sharepoint.com/teams/azureteams/aapt/azureux/portalfx/SiteAssets/PortalFx%20Notebook/Gauge/Ibiza%20Telemetry%20-%20Internal.one)
+Following are some of the dashboards that we support. If you do not have access to any of these please contact [ibiza-telemetry@microsoft.com](mailto:ibiza-telemetry@microsoft.com)
 
 |Name                            | PowerBi Link                                                                                                                                     | Metrics Description                                                                    |
 |--------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-|Portal User Adoption Dashboard  | [http://aka.ms/portalfx/dashboard/PortalUserAdoption](http://aka.ms/portalfx/dashboard/PortalUserAdoption)                                       |                                                                                        |
-|Portal Performance Dashboard    | [http://aka.ms/portalfx/dashboard/PortalPerformance](http://aka.ms/portalfx/dashboard/PortalPerformance)                                         | [Perf Docs](portalfx-performance.md)                              |
-|Portal Reliability Dashboard    | [http://aka.ms/portalfx/dashboard/PortalReliability](http://aka.ms/portalfx/dashboard/PortalReliability)                                         | [Reliability Docs](portalfx-reliability.md)                       |
+|Portal Performance Dashboard    | [http://aka.ms/portalfx/dashboard/extensionperf](http://aka.ms/portalfx/dashboard/extensionperf)                                         | [Perf Docs](portalfx-performance.md)                              |
+|Portal Reliability Dashboard    | [http://aka.ms/portalfx/dashboard/extensionperf](http://aka.ms/portalfx/dashboard/extensionperf)                                          | [Reliability Docs](portalfx-reliability.md)                       |
 |Portal Create Dashboard         | [http://aka.ms/portalfx/dashboard/PortalCreate](http://aka.ms/portalfx/dashboard/PortalCreate)                                                   | [Create Docs](portalfx-telemetry-create.md)                       |
 |Extension Errors Dashboard      | [http://aka.ms/portalfx/dashboard/ExtensionErrors](http://aka.ms/portalfx/dashboard/ExtensionErrors)                                             | [Extension Errors Docs](portalfx-telemetry-extension-errors.md)   |
 

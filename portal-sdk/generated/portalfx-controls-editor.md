@@ -32,7 +32,7 @@ export class SampleEditorViewModel extends MsPortalFx.ViewModels.Controls.Docume
     */
    constructor(lifetimeManager: MsPortalFx.Base.LifetimeManager) {
        // Mock up sample javascript file content.
-       var content =
+       const content =
            [
                "function test1(name, job) {",
                "    alert('Welcome ' + name + ', the ' + job);",
@@ -47,14 +47,15 @@ export class SampleEditorViewModel extends MsPortalFx.ViewModels.Controls.Docume
                "        x = x + 'The number is ' + i;",
                "    }",
                "    document.getElementById('demo').innerHTML = x;",
-               "}"
+               "}",
            ].join("\n");
 
        // Set up whether or not to show line numbers and what the tab size is in the editor.
-       var options = {
+       const options = {
                lineNumbers: false,
+               enhancedScrollbar: true,
                tabSize: 4,
-               wrappingColumn: 0
+               wrappingColumn: 0,
            };
 
        // Initialize the editor with the above content and options, as well as set the type to be JavaScript.
@@ -65,6 +66,7 @@ export class SampleEditorViewModel extends MsPortalFx.ViewModels.Controls.Docume
 /**
 * ViewModel class for the editor sample part.
 */
+@Di.Class("viewModel")
 export class EditorInstructionsPartViewModel
    implements Def.EditorInstructionsPartViewModel.Contract {
 
@@ -76,30 +78,28 @@ export class EditorInstructionsPartViewModel
    /**
     * View model for the save button.
     */
-   public saveButton: MsPortalFx.ViewModels.Controls.Forms.Button.Contract;
+   public saveButton: Button.Contract;
 
    /**
     * Creates a new instance of the EditorInstructionsPartViewModel class.
     *
     * @param container The view model for the part container.
-    * @param initialState The initial state for the part.
     * @param dataContext The data context.
     */
-   constructor(
-       container: MsPortalFx.ViewModels.PartContainerContract,
-       initialState: any,
-       dataContext: ControlsArea.DataContext) {
+   constructor(container: MsPortalFx.ViewModels.PartContainerContract) {
 
        // Initialize the editor view model.  If we were getting the data from teh data context, we would pass it in here.
        this.editorVM = new SampleEditorViewModel(container);
 
        // Initialize the save button and wire it up such that it saves the content of the editor.
-       this.saveButton = new MsPortalFx.ViewModels.Controls.Forms.Button.ViewModel(container);
-       this.saveButton.click = () => {
-           this.editorVM.save.execute().then(() => {
-               // Here is where you would put code that is executed after any changes have been written back to the content property on the viewmodel.
-           });
-       };
+       this.saveButton = Button.create(container, {
+           text: ClientResources.Editor.save,
+           onClick: () => {
+               this.editorVM.save.execute().then(() => {
+                   // Here is where you would put code that is executed after any changes have been written back to the content property on the viewmodel.
+               });
+           },
+       });
    }
 }
 

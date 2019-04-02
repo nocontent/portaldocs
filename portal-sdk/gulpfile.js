@@ -9,7 +9,6 @@ var Q = require('q');
 var gulp = require('gulp');
 var path = require('path');
 var util = require('util');
-var ncp = require('ncp');
 var dir = require('node-dir');
 var chalk = require('chalk');
 
@@ -17,8 +16,10 @@ var chalk = require('chalk');
 const sdkDir = __dirname;
 const generatedDir = path.resolve(sdkDir, 'generated');
 const templatesDir = path.resolve(sdkDir, 'templates');
-const mediaSourceDir = path.resolve(sdkDir, 'media');
 const fourMonthsAgo = new Date(new Date().setMonth(new Date().getMonth() - 4));
+
+const vstfrdWorkItemUrl = "http://vstfrd:8080/Azure/RD/_workitems#_a=edit&id=";
+const msazureWorkItemUrl = "https://msazure.visualstudio.com/DefaultCollection/One/_queries?id=";
 
 /**  
  * generates docs for ux design team
@@ -36,7 +37,9 @@ gulp.task('ux', function () {
 gulp.task('portal', function () {
     //required for short path to SamplesExtension
     gulpCommon.createSymlink("portal-sdk/samples/SamplesExtension", "../src/SDK/AcceptanceTests/Extensions/SamplesExtension");
+    gulpCommon.createSymlink("portal-sdk/samples/SampleAzExtension", "../src/SDK/AcceptanceTests/Extensions/SampleAzExtension");
     gulpCommon.createSymlink("portal-sdk/samples/InternalSamplesExtension", "../src/SDK/AcceptanceTests/Extensions/InternalSamplesExtension");
+    gulpCommon.createSymlink("portal-sdk/samples/VS", "../src/SDK/devkit/VS");
 
     if (!fs.existsSync(generatedDir)) {
         fs.mkdirSync(generatedDir);
@@ -60,7 +63,6 @@ gulp.task('portal', function () {
                     fs.mkdirSync(newGeneratedDir);
                 }
 
-                // return gulpCommon.processFile(f, newGeneratedDir, { headingNesting: { enabled: false } }, true);
                 return gulpCommon.processFile(f, newGeneratedDir, {}, true);
             });
 
@@ -74,12 +76,18 @@ gulp.task('portal', function () {
     }).then(function () {
         try {
             var checkLinkPromises = [Q()];
-            var promise = [Q()];
-            if (process.argv.indexOf("--verify") > 0) {
+            if (process.argv.indexOf("--verify") !== -1) {
                 return Q.ninvoke(dir, "paths", generatedDir, true)
                 .then(function(generatedFiles) {
                     console.log("Verifying urls are valid... (This may take a a couple of minutes)");
-                    checkLinkPromises = generatedFiles.map(function (fileName) {
+                    checkLinkPromises = generatedFiles.filter(function (fileName) {
+                        var filesToSkip = [
+                            "breaking-changes.md",
+                            "release-notes.md",
+                        ]
+                        
+                        return !filesToSkip.some(function(p) { return fileName.toUpperCase().endsWith(p.toUpperCase()) })
+                    }).map(function (fileName) {
                         return gulpCommon.checkLinks(path.resolve(generatedDir, fileName));
                     });
                     return Q.allSettled(checkLinkPromises);
@@ -92,7 +100,7 @@ gulp.task('portal', function () {
                                 {
                                     console.log(chalk.bgRed("Broken link/fragment found: " + JSON.stringify(v)));
                                 }
-                                console.log(chalk.bgRed("Broken link/fragment found in " + v.inputFile + " for url: " + v.url));
+                                console.log(chalk.bgRed("Broken link/fragment found in " + v.inputFile + " for url: " + v.url + " reason: " + v.reason));
                             });
                         }
                         else if (l.state === "rejected") {
@@ -100,7 +108,6 @@ gulp.task('portal', function () {
                         }
                     });
                 });
-                
             }
             
             return Q.defer().resolve();
@@ -115,15 +122,21 @@ gulp.task('portal', function () {
 
 //gulp task to generate auxdocs website content that was dynamic to static markdown docs 
 gulp.task('dynamicdocs', function () {
+    const prodSdkVersionMapIdx = process.argv.indexOf("--prodSdkMap");
+    let prodSdkVersionTags = {};
+    if (prodSdkVersionMapIdx !== -1 && process.argv.length - 1 >= prodSdkVersionMapIdx + 1) {
+        prodSdkVersionTags = JSON.parse(process.argv[prodSdkVersionMapIdx + 1]);
+    }
+
     var query = new storage.TableQuery()
         .where("InProductionDate ge datetime?", fourMonthsAgo.toISOString())
         .and("InProduction eq ?", true)
-        .and("Type ne ?", "Commit");
+        .and("Type ne ?", "");
     console.log("querying portalfx commit logs");
     return queryPortalFxLogs(query, null, null)
         .then(function (results) {
             console.log("generating docs for %s commit logs", results.length);
-            return generateDynamicDocs(results, generatedDir);
+            return generateDynamicDocs(results, generatedDir, prodSdkVersionTags);
         });
 });
 
@@ -156,39 +169,34 @@ function queryPortalFxLogs(query, continuationToken, mergedResults) {
 /** 
  * Generates release-notes.md, breaking-changes.md and downloads.md docs given an array of portalFxLogs
  */
-function generateDynamicDocs(portalFxLogs, outputDir) {
-    var blobSvc = storage.createBlobService();
+function generateDynamicDocs(portalFxLogs, outputDir, prodSdkVersionTags) {
+    const blobSvc = storage.createBlobService();
+    const downloadUrlPromises = [];
+    const aggregate = {};
+    const noChangesRowTemplate = "<tr><td>None</td><td>None</td><td>No public work items listed in this build.</td></tr>"
+    const releaseNoteRowTemplate = "<tr><td><a href='%s%s'>%s</a></td><td>%s</td><td>%s</td></tr>";
+    const breakingChangeRowTemplate = "<tr><td><a href='%s%s'>%s</a></td><td><a href='%s%s'>%s</a><p>%s</p></td></tr>";
     var previousRNVersion, previousBCVersion;
-    var downloadUrlPromises = [];
-    var aggregate = {};
-
-    const releaseNoteRowTemplate = "<tr><td><a href='http://vstfrd:8080/Azure/RD/_workitems#_a=edit&id=%s'>%s</a></td><td>%s</td><td>%s</td></tr>";
-    const breakingChangeRowTemplate = "<tr><td><a href='http://vstfrd:8080/Azure/RD/_workitems#_a=edit&id=%s'>%s</a></td><td><a href='http://vstfrd:8080/Azure/RD/_workitems#_a=edit&id=%s'>%s</a><p>%s</p></td></tr>";
-    var startDate = new Date();
-    var expiryDate = new Date(startDate);
-    expiryDate.setMonth(startDate.getMonth() + 1);
-    startDate.setMinutes(startDate.getMinutes() - 10); //avoid clock skew
-
-    var sasPolicy = {
-        AccessPolicy: {
-            Permissions: storage.BlobUtilities.SharedAccessPermissions.READ,
-            Start: startDate,
-            Expiry: expiryDate
-        },
-    };
     var rnRows = "", bcRows = "";
+
+    prodSdkVersionTags = prodSdkVersionTags || {};
 
     //iterate in reverse to preserve order descending version order from storage. aggregate content by version for the three docs
     for (var i = portalFxLogs.length - 1; i >= 0; i--) {
-        var entity = portalFxLogs[i];
-        var changeType = entity.Type._;
-        var sdkVersion = entity.PartitionKey._;
-        var isBreakingChange = entity.IsBreakingChange._;
-        var title = entity.Title ? entity.Title._ : "";
+        const entity = portalFxLogs[i];
+        const changeType = entity.Type._;
+        const sdkVersion = entity.PartitionKey._;
+        const isBreakingChange = entity.IsBreakingChange._;
+        const isReleaseNote = entity.IsReleaseNote && entity.IsReleaseNote._;
+        const title = entity.Title ? entity.Title._ : "";
+        const workItemUrl = getWorkItemUrl(changeType);
         aggregate[sdkVersion] = aggregate[sdkVersion] || { breakingCount: 0, featureCount: 0, bugFixCount: 0, downloadUrl: "", dateInProd: entity.Date._, breakingChanges: { rows: "", titles: [] } };
 
         if (previousRNVersion !== sdkVersion) {
             if (previousRNVersion) {
+                if (!rnRows) { // If there aren't any bug fixes/features then insert an empty row
+                    rnRows = noChangesRowTemplate;
+                }
                 aggregate[previousRNVersion].releaseNotes = rnRows;
                 rnRows = "";
             }
@@ -201,12 +209,15 @@ function generateDynamicDocs(portalFxLogs, outputDir) {
             previousRNVersion = sdkVersion;
         }
 
-        //add row to release notes        
-        rnRows = rnRows.concat(util.format(releaseNoteRowTemplate,
-            entity.RowKey._,
-            entity.RowKey._,
-            getPrettyChangeType(isBreakingChange, changeType),
-            title));
+        //add row to release notes
+        if (isReleaseNote) {
+            rnRows = rnRows.concat(util.format(releaseNoteRowTemplate,
+                workItemUrl,
+                entity.RowKey._,
+                entity.RowKey._,
+                getPrettyChangeType(isBreakingChange, changeType),
+                title));
+        }
 
         //add row to breaking changes
         if (isBreakingChange) {
@@ -220,47 +231,72 @@ function generateDynamicDocs(portalFxLogs, outputDir) {
 
             aggregate[sdkVersion].breakingChanges.titles.push(title);
             bcRows = bcRows.concat(util.format(breakingChangeRowTemplate,
+                workItemUrl,
                 entity.RowKey._,
                 entity.RowKey._,
+                workItemUrl,
                 entity.RowKey._,
                 title,
                 entity.BreakingChangeDescription ? entity.BreakingChangeDescription._ : "No description available for this breaking change."));
 
             if (entity.BreakingChangeDescription && !entity.BreakingChangeDescription._) {
-                console.error(util.format("*** The following breaking change has no description http://vstfrd:8080/Azure/RD/_workitems#_a=edit&id=%s", entity.BreakingChangeDescription._));
+                console.error(util.format("*** The following breaking change has no description https://msazure.visualstudio.com/One/Azure%20Portal/_workitems/edit/%s", entity.BreakingChangeDescription._ || entity.RowKey._));
             }
         }
 
         updateAggregate(aggregate[sdkVersion], isBreakingChange, changeType);
     }
+
+    for (var sdkVersion in prodSdkVersionTags) {
+        aggregate[sdkVersion] = aggregate[sdkVersion] || { breakingCount: 0, featureCount: 0, bugFixCount: 0, downloadUrl: "", dateInProd: undefined, breakingChanges: { rows: "", titles: [] } };
+        aggregate[sdkVersion].prodSdkVersionTags = prodSdkVersionTags[sdkVersion];
+    }
+
     aggregate[previousRNVersion].releaseNotes = rnRows;
     if (previousBCVersion) {
         aggregate[previousBCVersion].breakingChanges.rows = bcRows;
     }
 
     return Q.allSettled(downloadUrlPromises).then(function (results) {
-        writeDocsToFile(aggregate, outputDir);
+        writeDocsToFile(aggregate, outputDir, prodSdkVersionTags);
     });
 }
 
 /**
  * Takes the aggregate content for all versions and writes it to release-notes.md, breaking-changes.md and downloads.md
  */
-function writeDocsToFile(aggregate, outputDir) {
+function writeDocsToFile(aggregate, outputDir, prodSdkVersionTags) {
     var releaseNotesFile = fs.createWriteStream(path.resolve(outputDir, "release-notes.md"));
     var breakingChangesFile = fs.createWriteStream(path.resolve(outputDir, "breaking-changes.md"));
     var downloadsDoc = fs.createWriteStream(path.resolve(outputDir, "downloads.md"));
-    const latestSdkVersion = Object.keys(aggregate)[0];
+    var latestDownloadableSdkVersion = "";
+
+    // Find the highest version with a download link
+    var sortedVersions = Object.keys(aggregate).sort(versioncompare).reverse();
+    var latestDownloadableSdkVersion = sortedVersions.find(function (version) {
+        var aVersion = aggregate[version];
+        return !!aVersion.downloadUrl;
+    });
 
     releaseNotesFile.write(util.format("# Release Notes since %s", fourMonthsAgo.toLocaleDateString("en-US")));
     breakingChangesFile.write(util.format("# Breaking Changes since %s \n* Additional Q&A about breaking changes can be found [here](./breaking-changes.md) \n* To ask a question about breaking changes [use this](https://aka.ms/ask/ibiza-breaking-change)  \n", fourMonthsAgo.toLocaleDateString("en-US")));
-    downloadsDoc.write(util.format("# Download Portal SDK \n Download Latest Release: <a href=\"%s\">%s</a>\n<table><tr><th>Download</th><th>Detail</th><th>Breaking Changes</th></tr>", aggregate[latestSdkVersion].downloadUrl, latestSdkVersion));
+    const downloadLinks = util.format("Download Latest Release: <a href=\"%s\">%s</a>", aggregate[latestDownloadableSdkVersion].downloadUrl, latestDownloadableSdkVersion);
+    const sortedProdSdkVersionTag = Object.keys(prodSdkVersionTags).sort(versioncompare).reverse();
+    let perCloudDownloadLinks = "";
 
-    Object.keys(aggregate).forEach(function (version) {
-        var result = aggregate[version]
+    sortedProdSdkVersionTag.forEach(function (version) {
+        var cloudDownloadVersionLinks = aggregate[version].downloadUrl 
+            ? util.format("<a href=\"%s\">%s</a> : %s", aggregate[version].downloadUrl, version, prodSdkVersionTags[version].join(","))
+            : util.format("%s : %s", version, prodSdkVersionTags[version].join(","));
+        perCloudDownloadLinks += util.format("<br/> Download %s", cloudDownloadVersionLinks);
+    });
+
+    downloadsDoc.write(util.format("# Download Portal SDK \n %s \n\n Each version of the SDK is supported for 120 days. Extensions must upgrade to a newer version of the SDK within 120 days from the release of the SDK version they are currently using as runtime backward compatibility is not supported beyond that. \n\n <table><tr><th>Download</th><th>Detail</th><th>Breaking Changes</th></tr>", perCloudDownloadLinks || downloadLinks));
+
+    sortedVersions.forEach(function (version) {
+        var result = aggregate[version];
         var versionFragment = version.replace(/\./g, '');
 
-        console.log("Version: " + version);
         releaseNotesFile.write(util.format("\n\n## %s\n%d Breaking Changes, %d Features added and %d Bugs Fixed\n<table>%s</table>",
             version,
             result.breakingCount,
@@ -274,12 +310,13 @@ function writeDocsToFile(aggregate, outputDir) {
                 result.breakingChanges.rows));
         }
 
-        downloadsDoc.write(util.format("<tr><td name=\"%s\">%s<br/>%s</td><td>%s<br/>%s</td><td>%s</td></tr>",
+        downloadsDoc.write(util.format("<tr><td name=\"%s\">%s<br/>%s<br/>%s</td><td>%s<br/>%s</td><td>%s</td></tr>",
             versionFragment,
             result.downloadUrl
                 ? util.format("<a href=\"%s\">%s</a>", result.downloadUrl, version)
                 : version,
-            result.dateInProd.toLocaleDateString("en-US"),
+            result.dateInProd && result.dateInProd.toLocaleDateString("en-US") || "",
+            result.prodSdkVersionTags && result.prodSdkVersionTags.join(", ") || "",
             util.format("%d Breaking Changes, %d Features added and %d Bugs Fixed", result.breakingCount, result.featureCount, result.bugFixCount),
             util.format("<a href=\"./release-notes.md#%s\">more details...</a>", versionFragment),
             result.breakingChanges.titles.length > 0
@@ -298,13 +335,11 @@ function writeDocsToFile(aggregate, outputDir) {
  * updates versionAggregate the # of breaking changes, tasks and bugs
  */
 function updateAggregate(versionAggregate, isBreakingChange, changeType) {
-
     if (isBreakingChange) {
         versionAggregate.breakingCount += 1;
-    } else if (changeType === "RDTask") {
+    } else if (changeType === "RDTask" || changeType === "Task" || changeType === "Product Backlog Item") {
         versionAggregate.featureCount += 1;
-
-    } else if (changeType === "RDBug") {
+    } else if (changeType === "RDBug" || changeType == "Bug") {
         versionAggregate.bugFixCount += 1;
     }
 
@@ -328,11 +363,33 @@ function getBlobDownloadUrl(blobSvc, container, blobName, sdkVersion) {
 function getPrettyChangeType(isBreaking, changeType) {
     if (isBreaking) {
         return "<strong>Break</strong>";
-    } else if (changeType === "RDTask") {
+    } else if (changeType === "RDTask" || changeType == "Task" || changeType === "Product Backlog Item") {
         return "Feature";
-    } else if (changeType === "RDBug") {
+    } else if (changeType === "RDBug" || changeType == "Bug") {
         return "Bug Fix";
     } else {
         return changeType;
     }
 }
+
+function getWorkItemUrl(changeType) {
+    // We assume that if the change type starts with "RD" then its from VSTFRD, else its from MSAZURE.  While not perfect, this should catch most cases
+    return changeType.startsWith("RD") ? vstfrdWorkItemUrl : msazureWorkItemUrl
+}
+
+/**
+ * Compares version numbers for sorting ascended.  Modified from semver-compare to look at 4 numbers rather than 3
+ */
+function versioncompare(a, b) {
+    var pa = a.split('.');
+    var pb = b.split('.');
+    for (var i = 0; i < 4; i++) {
+        var na = Number(pa[i]);
+        var nb = Number(pb[i]);
+        if (na > nb) return 1;
+        if (nb > na) return -1;
+        if (!isNaN(na) && isNaN(nb)) return 1;
+        if (isNaN(na) && !isNaN(nb)) return -1;
+    }
+    return 0;
+};

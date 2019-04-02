@@ -5,7 +5,7 @@
 //workaround no support for Visual Studio Online url format
 var fs = require('fs');
 var utilFilePath = process.cwd() + '\\node_modules\\gitinfo\\dist\\utils.js';
-if(fs.existsSync(utilFilePath)) {
+if (fs.existsSync(utilFilePath)) {
     var utilContent = fs.readFileSync(utilFilePath, { 'encoding': 'utf8' });
     var result = utilContent.replace(/url.length !== 2/g, 'url.length < 2');
     fs.writeFileSync(utilFilePath, result, { 'encoding': 'utf8' });
@@ -17,23 +17,24 @@ var gitdown = require('gitdown');
 var path = require('path');
 var Q = require('q');
 var util = require('util');
-var deadlink = require('deadlink');
 var chalk = require('chalk');
 var urlExt = require('url-extractor');
+var fetch = require('node-fetch');
 var findup = require('findup');
 var gitPath = findup.sync(process.cwd(), '.git\\HEAD');
 var MarkdownContents = require('markdown-contents');
+var eol = require('eol');
 
 var self = module.exports = {
     /**
      * Generates gitdown output for all files in the inputDir that have a path that match the fileMatchPattern.
      * the resulting output is written to outputDir.  Does not recurse directories for content.
      */
-    processDirectory: function(inputDir, outputDir, fileMatchPattern) {
+    processDirectory: function (inputDir, outputDir, fileMatchPattern) {
         const fileRegEx = new RegExp(fileMatchPattern, "i");
         var processFilePromises = [];
-        
-        if (!fs.existsSync(outputDir)){            
+
+        if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir);
         }
 
@@ -55,12 +56,12 @@ var self = module.exports = {
     processFile: function (inputFile, outDir, config, relativeLinkToHash) {
         console.log("processing: " + inputFile);
         var gd = gitdown.readFile(path.resolve(inputFile));
-        config.gitinfo = config.gitinfo || { gitPath: gitPath};
+        config.gitinfo = config.gitinfo || { gitPath: gitPath };
         gd.setConfig(config);
 
         //register a custom helper that injects h1 anchor tags per document
-        gd.registerHelper('include-file',{
-            weight:20,
+        gd.registerHelper('include-file', {
+            weight: 20,
             compile: !!relativeLinkToHash ? self.includeFile : gitdownIncludeHelper.compile
         });
 
@@ -69,12 +70,19 @@ var self = module.exports = {
             weight: 10,
             compile: self.includeSection
         });
-        
+
         gd.registerHelper('include-headings', {
             weight: 30,
             compile: self.includeHeadings
         });
-        return gd.writeFile(path.resolve(outDir, path.basename(inputFile)));
+
+        var outputFile = path.resolve(outDir, path.basename(inputFile));
+
+        // Write the file ourselves intead of using gitdown.WriteFile so we can fix line endings to be CRLF.
+        return gd.get().then((outputString) => {
+            var outputStringFixedLineEndings = eol.crlf(outputString);
+            return fs.writeFileSync(outputFile, outputStringFixedLineEndings);
+        });
     },
     includeHeadings: function (config, context) {
         if (!config.file) {
@@ -82,14 +90,14 @@ var self = module.exports = {
         }
         try {
             config.maxLevel = config.maxLevel || 2;
-            
+
             var fullFilePath = path.resolve(context.gitdown.getConfig().baseDirectory, config.file);
             var relativeFilePath = fullFilePath.replace(context.gitdown.getConfig().baseDirectory, "");
-            
+
             if (!fs.existsSync(fullFilePath)) {
                 throw new Error('Input file does not exist: ' + config.file);
             }
-            
+
             var content = fs.readFileSync(fullFilePath, {
                 encoding: 'utf8'
             });
@@ -103,7 +111,7 @@ var self = module.exports = {
 
             output = self.appendFilepathsToLinks(output, relativeFilePath);
         } catch (err) {
-            console.log ("An error occured while trying to include headings: " + err);
+            console.log("An error occured while trying to include headings: " + err);
         }
 
         return output;
@@ -127,18 +135,18 @@ var self = module.exports = {
      *
      * @private
      */
-   maxLevel: function (tree) {
-      var maxLevel = arguments.length <= 1 || arguments[1] === undefined ? 1 : arguments[1];
+    maxLevel: function (tree) {
+        var maxLevel = arguments.length <= 1 || arguments[1] === undefined ? 1 : arguments[1];
 
-      tree.forEach((article, index) => {
-        if (article.level > maxLevel) {
-          delete tree[index];
-        } else {
-          article.descendants = self.maxLevel(article.descendants, maxLevel);
-        }
-      });
+        tree.forEach((article, index) => {
+            if (article.level > maxLevel) {
+                delete tree[index];
+            } else {
+                article.descendants = self.maxLevel(article.descendants, maxLevel);
+            }
+        });
 
-      return tree;
+        return tree;
     },
     /**
      * Extending gitdown to provide code snippet injection. 
@@ -165,14 +173,18 @@ var self = module.exports = {
         });
 
         const xmlCommentRegEx = "<!--[ ]?%s[ ]?-->([^]+?)<!--[ ]%s[ ]-->";
-        const codeCommentRegEx = "\\/\\/%s([^]+?)\\/\\/%s";
+        const codeCommentRegEx = "\\/\\/[ ]?%s([^]+?)\\/\\/[ ]?%s";
+        const ejsCommentRegEx = "<%\\s*\\/\\*[ ]?%s[ ]?\\*\\/\\s*%>([^]+?)<%\\s*\\/\\*[ ]?%s[ ]?\\*\\/\\s*%>";
         const xmlSnippetTemplate = "```xml\n%s\n```";
         const extRegEx = {
             ".config": { regEx: xmlCommentRegEx, template: xmlSnippetTemplate },
             ".pdl": { regEx: xmlCommentRegEx, template: xmlSnippetTemplate },
+            ".csproj": { regEx: xmlCommentRegEx, template: xmlSnippetTemplate },
             ".html": { regEx: xmlCommentRegEx, template: xmlSnippetTemplate },
             ".cs": { regEx: codeCommentRegEx, template: "```csharp\n%s\n```" },
-            ".ts": { regEx: codeCommentRegEx, template: "```typescript\n%s\n```" }
+            ".ts": { regEx: codeCommentRegEx, template: "```typescript\n%s\n```" },
+            ".tsx": { regEx: codeCommentRegEx, template: "```typescript\n%s\n```" },
+            ".ejs": { regEx: ejsCommentRegEx, template: xmlSnippetTemplate }
         };
         const fileExtension = path.extname(config.file);
         const sectionPattern = util.format(extRegEx[fileExtension].regEx, config.section, config.section);
@@ -183,8 +195,8 @@ var self = module.exports = {
             var sectionContent = sectionContentMatches.pop();
             const firstLineWhiteSpaceRegEx = new RegExp("^[ \t]+", "gm");
             const firstLineWhiteSpace = firstLineWhiteSpaceRegEx.exec(sectionContent);
-            if(firstLineWhiteSpace && firstLineWhiteSpace.length > 0) {
-                const regExMatchWhiteSpaceMultiLine = new RegExp(util.format("^[ \t]{%s}", firstLineWhiteSpace.pop().length ), "gm");
+            if (firstLineWhiteSpace && firstLineWhiteSpace.length > 0) {
+                const regExMatchWhiteSpaceMultiLine = new RegExp(util.format("^[ \t]{%s}", firstLineWhiteSpace.pop().length), "gm");
                 sectionContent = sectionContent.replace(regExMatchWhiteSpaceMultiLine, '');
             }
 
@@ -205,7 +217,7 @@ var self = module.exports = {
         }
 
         const originalContent = gitdownIncludeHelper.compile(config, context);
-        
+
         return originalContent;
     },
     /**
@@ -213,7 +225,7 @@ var self = module.exports = {
      * gitdown references that provide code snippet injection into docs and also to maintain the same folder structure that
      * will be present on github
      */
-     createSymlink: function(fromDir, toDir) {
+    createSymlink: function (fromDir, toDir) {
         // alternative is to use environmental variable but gitdown does not support that resolution of env var in path.  
         // so would need to do that for both regular gitdown references and for include sections
         const resolvedFromDir = path.resolve(__dirname, fromDir);
@@ -229,130 +241,132 @@ var self = module.exports = {
     },
     /**
      * Validates the links within a given file includes those that start with #, ., / and http
+     * Links that are behind authentication (401 or 403 response codes) can not be properly verified and will not be reported as failures.
      */
-    checkLinks: function(inputFile) {
+    checkLinks: function (inputFile) {
         var links = [];
         var docs = [];
         var brokenLinks = [];
-        return Q.ninvoke(fs, 'readFile', inputFile,'utf8').then(function (result) {
+        return Q.ninvoke(fs, 'readFile', inputFile, 'utf8').then(function (result) {
             //console.log("checking links in " + inputFile);
             var urls = urlExt.extractUrls(result, urlExt.SOURCE_TYPE_MARKDOWN);
-            
+
+            // Make sure to comment why the url is being skipped
+            // Do not include http:// or https:// as they get trimmed when matching
             var urlsToSkip = [
-                            "aadonboardingsiteppe.cloudapp.net",
-                            "aka.ms",
-                            "cecfundamentals",
-                            "cosmos11.osdinfra.net",
-                            "datacatalog.analytics.msftcloudes.com",
-                            "df.onecloud.azure-test.net",
-                            "examplecdn.vo.msecnd.net",
-                            "github.com/Azure/azure-marketplace/wiki",
-                            "github.com/Azure/msportalfx-test",
-                            "idwebelements",
-                            "igroup",
-                            "kusto.azurewebsites.net",
-                            "localhost",
-                            "mailto:",
-                            "management.azure.com",
-                            "microsoft.sharepoint.com",
-                            "msazure.pkgs.visualstudio.com",
-                            "msblox.pkgs.visualstudio.com",
-                            "msdn.microsoft.com",
-                            "msinterface",
-                            "myextension.cloudapp.net",
-                            "myextension.hosting.portal.azure.net",
-                            "onenote",
-                            "onestb.cloudapp.net",
-                            "perf.demo.ext.azure.com",
-                            "portal.azure.com", 
-                            "production.diagnostics.monitoring.core.windows.net",
-                            "qe",
-                            "ramweb",
-                            "sharepoint",
-                            "spot",
-                            "ssladmin",
-                            "stackoverflow.microsoft.com",
-                            "technet.microsoft.com",
-                            "wanuget",
-                            "www.visualstudio.com/en-us/docs",
-                            "vstfrd",
-                            "&#x6d;", // html encoding for mailto: some reason there are multiple encodings
-                            "&#109;" // html encoding for mailto: some reason there are multiple encodings
-                        ];
-            
+                "aka.ms/msportalfx-test", // Github returns a 404 if you aren't authorized instead of a 403
+                "examplecdn.vo.msecnd.net", // fake url
+                "mybizaextensiondf.blob.core.windows.net/extension", // fake url
+                "mybizaextensionprod.blob.core.windows.net/extension ", // fake url 
+                "mybizaextensionprod.blob.core.windows.net/extension",  // fake url 
+                "warm/newrelease/ev2", // Returns unable to get local issuer certificate
+                "msinterface/form.aspx?ID=4260",  // Returns connection timed out
+                "github.com/Azure/azure-marketplace/wiki", // Github returns a 404 if you aren't authorized instead of a 403/401
+                "github.com/Azure/msportalfx-test", // Github returns a 404 if you aren't authorized instead of a 403/401
+                "localhost",  // fake url/
+                "mailto:", // email link
+                "myaccess", //cert 
+                "management.azure.com/api/invoke",  // returns a bad request since 
+                "msdn.microsoft.com/en-us/library/system.reflection.assemblyversionattribute(v=vs.110", // Bug in url extractor where its not capturing the entire url
+                "msdn.microsoft.com/en-us/library/system.reflection.assemblyinformationalversionattribute(v=vs.110", // Bug in url extractor where its not capturing the entire url
+                "myextension.cloudapp.net",  // fake url
+                "myextension.hosting.portal.azure.net",  // fake url
+                "onenote", // onenote link
+                "onestb.cloudapp.net",  // fake url
+                "perf.demo.ext.azure.com",  // fake url
+                "ramweb",  // returns a certificate not trusted error
+                "servicetree.msftcloudes.com",  // returns 302 Unauthorized (invalid)
+                "technet.microsoft.com/en-us/library/cc730629(v=ws.10", // Bug in url extractor where its not capturing the entire url
+                "www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd&quot;&gt;", // Bug in url extractor where it captured extra characters after the url
+                "&#x6d;", // html encoding for mailto: some reason there are multiple encodings
+                "&#109;", // html encoding for mailto: some reason there are multiple encodings
+                "\\\\products\\public\\PRODUCTS\\Developers\\Visual Studio 2015\\Enterprise 2015.3", // internal network share
+                "idwebelements", // internal
+                "qe" //internal
+            ];
+
             var count = 0;
-            urls.forEach(function(url) {
+            urls.forEach(function (url) {
                 // Trim the http:// or https://
                 var regex = new RegExp("(^HTTPS://|HTTP://)", "i");
-                var trimmedUrl = url.replace(regex,"");
-                
-                if (urlsToSkip.some(function(s) { return trimmedUrl.toUpperCase().indexOf(s.toUpperCase()) == 0 || trimmedUrl.toUpperCase().indexOf("@") >= 0; /** catch emails **/ }))
-                {
+                var trimmedUrl = url.replace(regex, "");
+
+                if (urlsToSkip.some(function (s) { return trimmedUrl.toUpperCase().indexOf(s.toUpperCase()) == 0 || trimmedUrl.toUpperCase().indexOf("@") >= 0; /** catch emails **/ })) {
                     //console.log(chalk.yellow("Skipping check for url: " + url));
                     return;
                 }
-                
+
                 switch (url[0]) {
-                    case "#": 
-                        if (!result.includes("name=\"" + url.substr(1) + "\"")) {
-                           //console.log(chalk.red("\tHyperlink " + url  + " does not refer to a valid link in the document.  Input file: " + inputFile));
-                           brokenLinks.push({ "url":url, "inputFile":inputFile });
-                           count++;
+                    case "#":
+                        const fragment = url.substr(1);
+                        //this regex allows for a match on the markdown header tag. e.g: a fragment of #some-fragment
+                        // will search the doc to see if there is any subheading e.g ### some Fragment. 
+                        // github respects navigating to fragment when heading depth is >= 1
+                        const matchHeading = util.format("^[#]+[\\s]?%s", fragment.replace(/-/gm, " "));
+                        const matchFragment = new RegExp(matchHeading, "gmi");
+                        if (!(result.includes("name=\"" + fragment + "\"") || matchFragment.exec(result))) {
+                            //console.log(chalk.red("\tHyperlink " + url  + " does not refer to a valid link in the document.  Input file: " + inputFile));
+                            brokenLinks.push({ "url": url, "inputFile": inputFile });
+                            count++;
                         }
                         break;
                     case "/":
                         var sanitizedPath = url.substr(0, url.indexOf("#") > 0 ? url.indexOf("#") : url.length).replace(/\//gm, "\\");
                         var file = __dirname + sanitizedPath + (!path.extname(sanitizedPath) ? '.md' : '');
                         if (!fs.existsSync(file)) {
-                           //console.log(chalk.red("\tLink : " + url + " does not resolve to valid path. Resolved path " + file + "does not exist. Input file: " + inputFile));
-                           brokenLinks.push({ "url":url, "inputFile":inputFile });
-                           count++;
+                            //console.log(chalk.red("\tLink : " + url + " does not resolve to valid path. Resolved path " + file + "does not exist. Input file: " + inputFile));
+                            brokenLinks.push({ "url": url, "inputFile": inputFile });
+                            count++;
                         }
                         break;
                     case "h":
-                            links.push(url);
+                        links.push(url);
                         break;
                     case ".":
                     default:
                         var sanitizedPath = url.substr(0, url.indexOf("#") > 0 ? url.indexOf("#") : url.length).replace(/\//gm, "\\");
                         var file = path.resolve(path.dirname(inputFile), sanitizedPath);
-                        if (!fs.existsSync(file)) {
-                           //console.log(chalk.red("\tLink : " + url + " does not resolve to valid path. Resolved path " + file + "does not exist. Input file: " + inputFile));
-                           brokenLinks.push({ "url":url, "inputFile":inputFile });
-                           count++;
+                        if (!(fs.existsSync(file) && fs.statSync(file).isFile())) {
+                            //console.log(chalk.red("\tLink : " + url + " does not resolve to valid path. Resolved path " + file + "does not exist. Input file: " + inputFile));
+                            brokenLinks.push({ "url": url, "inputFile": inputFile, "reason": "Does not exist or is not a file." });
+                            count++;
                         }
                         break;
                 }
             });
-        }).then(function() {
-            try {
-                var dl = deadlink();
-                var promises = dl.resolve(links);
-                
-                return Q.all(promises).then(function(resolutions) {
-                    resolutions.forEach(function (resolution) {
-                        if (resolution.error || resolution.Error) {
-                            brokenLinks.push({ "url":resolution.url, "inputFile":inputFile, "data":resolution });
+        }).then(function () {
+            // Check that all links are valid
+            return links.reduce((prev, curr) => {
+                return prev.then(() => {
+                    return fetch(curr, {
+                        method: "HEAD"
+                    }).then((response) => {
+                        if (!response.ok) {
+                            if (response.status === 401 /* Unauthorized */ ||
+                                response.status === 403 /* Forbidden */) {
+                                // Ignore authenticated endpoints
+                            } else if (response.status === 404 /* Not Found */ ||
+                                response.status === 405 /* Method Not Allowed */ ||
+                                response.status === 503 /* Service Unavailable */) {
+                                // Retry possibly unsupported HEAD requests
+                                return fetch(curr, {
+                                    method: "GET"
+                                }).then((response) => {
+                                    if (!response.ok) {
+                                        throw new Error(response.statusText);
+                                    }
+                                })
+                            } else {
+                                // Bad link
+                                throw new Error(response.statusText);
+                            }
                         }
+                    }).catch((ex) => {
+                        brokenLinks.push({ "url": curr, "inputFile": inputFile, "reason": ex.message });
                     });
-                    
-                }, function(errors) {
-                    if (errors.hostname) {
-                        brokenLinks.push({ "url":errors.hostname, "inputFile":inputFile, "data":errors });
-                    }
-                    else if (errors.address) {
-                        brokenLinks.push({ "url":errors.address, "inputFile":inputFile, "data":errors });
-                    }
-                    else {
-                        brokenLinks.push({ "inputFile":inputFile, "data":errors });
-                    }
                 });
-            }
-            catch (err) {
-                console.log(chalk.red("Error in checking links: " + err));
-                return Q.all(promises);
-            }
-        }).then(function() {
+            }, Q());
+        }).then(function () {
             return brokenLinks;
         });
     }
